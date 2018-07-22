@@ -5,22 +5,24 @@ import android.support.v7.app.AppCompatActivity
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.nytimes.android.external.store3.base.impl.BarCode
+import com.nytimes.android.external.store3.base.impl.MemoryPolicy
+import com.nytimes.android.external.store3.base.impl.Store
 import com.nytimes.android.external.store3.base.impl.StoreBuilder
 import com.nytimes.android.external.store3.middleware.GsonParserFactory
-import com.nytimes.android.external.store3.middleware.GsonTransformerFactory
-import com.nytimes.android.external.store3.middleware.moshi.MoshiTransformerFactory
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.rxkotlin.subscribeBy
 import io.reactivex.schedulers.Schedulers
-import io.reactivex.subscribers.DisposableSubscriber
 import kotlinx.android.synthetic.main.activity_main.*
 import okio.BufferedSource
 import retrofit2.Retrofit
 import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory
 import retrofit2.converter.gson.GsonConverterFactory
 import timber.log.Timber
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
+
+    lateinit var reposStore: Store<List<Repos>, BarCode>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,24 +46,33 @@ class MainActivity : AppCompatActivity() {
 
         val repoParser = GsonParserFactory.createSourceParser<List<Repos>>(gson, object : TypeToken<List<Repos>>() {}.type)
 
-        val reposStore = StoreBuilder.parsedWithKey<BarCode, BufferedSource, List<Repos>>()
+        reposStore = StoreBuilder.parsedWithKey<BarCode, BufferedSource, List<Repos>>()
                 .fetcher { barcode -> repoFetcher(repo, barcode.key) }
+                .memoryPolicy(MemoryPolicy.builder()
+                        .setExpireAfterTimeUnit(TimeUnit.MINUTES)
+                        .setExpireAfterWrite(30)
+                        .build())
                 .parser(repoParser)
                 .open()
 
-        val jemaystermind = BarCode("repos", "jemaystermind")
-        reposStore.get(jemaystermind)
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribeBy(
-                        onSuccess = {
-                            repos.text = it.toString()
-                            Timber.i(it.toString())
-                        },
-                        onError = {
-                            it.printStackTrace()
-                            Timber.e(it)
-                        }
-                )
+        btn_load.setOnClickListener {
+
+            var time = 0L
+            reposStore.get(BarCode("repos", "jemaystermind"))
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .doOnSubscribe { time = System.currentTimeMillis() }
+                    .doAfterTerminate { Timber.i("Duration=${System.currentTimeMillis() - time}")}
+                    .subscribeBy(
+                            onSuccess = {
+                                repos.text = it.toString()
+                                Timber.i(it.toString())
+                            },
+                            onError = {
+                                it.printStackTrace()
+                                Timber.e(it)
+                            }
+                    )
+        }
     }
 }
